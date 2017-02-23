@@ -41,7 +41,7 @@ class TwoLayerMLP(object):
     self.params['b2'] = np.zeros(output_size)
     self.activation = activation
 
-  def loss(self, X, y=None, reg=0.0):
+  def loss(self, X, y=None, reg=0.0, stable=False):
     """
     Compute the loss and gradients for a two layer fully connected neural
     network.
@@ -87,17 +87,29 @@ class TwoLayerMLP(object):
     
     elif self.activation is 'softplus':
         def stable_softplus(q):
-        	q -= np.max(q)
+        	#q -= np.max(q)
+        	#q -= np.apply_along_axis( np.max, axis=1, arr=q )
+        	#print q - np.apply_along_axis( np.max, axis=1, arr=q )
+        	#print 'did it'
         	return np.log(np.exp(q) + 1)
         
         hidden = stable_softplus(z1)
     
     elif self.activation is 'sigmoid':
-        def sigmoid(q):
-        	q -= np.max(q)
+        def sigmoid(q, stable):
+        	if stable:
+        		maxs = np.apply_along_axis( np.max, axis=1, arr=q ).T
+        		max_mat = np.vstack(tuple([maxs]*q.shape[1])).T
+        		q -= max_mat
+        	
         	return np.exp(q) / (1 + np.exp(q))
         
-        hidden = sigmoid(z1)
+      #   def sigmoid(q):
+    		# max_q = max(0.0, np.max(q))
+    		# rebased_q = q - max_q
+    		# return np.exp(rebased_q - np.logaddexp(-max_q, np.logaddexp.reduce(rebased_q)))
+        
+        hidden = sigmoid(z1, stable)
     
     else:
         raise ValueError('Unknown activation type')
@@ -127,22 +139,28 @@ class TwoLayerMLP(object):
     ###########################################################################
     
     # define classifier
-    def stable_softmax(q):
-        # subtract max for stability
-    	q -= np.max(q)
+    def stable_softmax(q, stable):
+    	if stable:
+    		# stabailze
+    		maxs = np.apply_along_axis( np.max, axis=1, arr=q ).T
+        	max_mat = np.vstack(tuple([maxs]*q.shape[1])).T
+        	q -= max_mat
 
-    	# exponentiate
-        exp_q = np.exp(q)
+
 
         # normalize
-        return exp_q / np.sum(exp_q, axis=1, keepdims=True)
+        return np.exp(q ) / (np.sum(np.exp(q)))
 	
-    def log_stable_softmax(q,x,y): 
-        return -np.log(stable_softmax(q)[range(x.shape[0]),y])
-    
+    def log_stable_softmax(q, stable):
+    	if stable:
+    		maxs = np.apply_along_axis( np.max, axis=1, arr=q ).T
+        	max_mat = np.vstack(tuple([maxs]*q.shape[1])).T
+        	q -= max_mat
+        	return maxs + np.log(np.exp(q - max_mat).sum(axis=1))
+    	return -np.log(np.exp(q).sum(axis=1))
     
     # compute data loss
-    data_loss = np.mean(log_stable_softmax(scores, X, y))
+    data_loss = log_stable_softmax(scores).mean()
     
     # compute regularization loss
     reg_loss = (0.5*reg) * ((W1**2).sum() + (W2**2).sum())
@@ -181,9 +199,9 @@ class TwoLayerMLP(object):
         dz1 = dhidden
         dz1[z1 <= 0] = 0
     elif self.activation is 'softplus':
-        def sigmoid(q):
-            q -= np.max(q)
-            return np.exp(q) / (1 + np.exp(q))
+        # def sigmoid(q):
+        #     q -= np.max(q)
+        #     return np.exp(q) / (1 + np.exp(q))
         dz1 = hidden*dhidden
 
     elif self.activation is 'sigmoid': 
