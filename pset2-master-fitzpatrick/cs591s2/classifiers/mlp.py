@@ -78,38 +78,17 @@ class TwoLayerMLP(object):
     # Store the result in the scores variable, which should be an array of
     # shape (N, C).
     ###########################################################################
-    z1 = np.dot(X, W1) + b1  # 1st layer activation, N*H
-    #print 'b1 shape: {}'.format(b1.shape)
+    z1 = np.clip(np.dot(X, W1) + b1,-100,100)  # 1st layer activation, N*H
     
     # 1st layer nonlinearity, N*H
     if self.activation is 'relu':
         hidden = np.maximum(0, z1)        
     
-    elif self.activation is 'softplus':
-        def stable_softplus(q):
-        	#q -= np.max(q)
-        	#q -= np.apply_along_axis( np.max, axis=1, arr=q )
-        	#print q - np.apply_along_axis( np.max, axis=1, arr=q )
-        	#print 'did it'
-        	return np.log(np.exp(q) + 1)
-        
-        hidden = stable_softplus(z1)
+    elif self.activation is 'softplus':        
+        hidden = np.log(1+np.exp(z1))
     
     elif self.activation is 'sigmoid':
-        def sigmoid(q, stable):
-        	if stable:
-        		maxs = np.apply_along_axis( np.max, axis=1, arr=q ).T
-        		max_mat = np.vstack(tuple([maxs]*q.shape[1])).T
-        		q -= max_mat
-        	
-        	return np.exp(q) / (1 + np.exp(q))
-        
-      #   def sigmoid(q):
-    		# max_q = max(0.0, np.max(q))
-    		# rebased_q = q - max_q
-    		# return np.exp(rebased_q - np.logaddexp(-max_q, np.logaddexp.reduce(rebased_q)))
-        
-        hidden = sigmoid(z1, stable)
+        hidden = 1 / (1+np.exp(-z1))
     
     else:
         raise ValueError('Unknown activation type')
@@ -139,28 +118,18 @@ class TwoLayerMLP(object):
     ###########################################################################
     
     # define classifier
-    def stable_softmax(q, stable):
-    	if stable:
-    		# stabailze
-    		maxs = np.apply_along_axis( np.max, axis=1, arr=q ).T
-        	max_mat = np.vstack(tuple([maxs]*q.shape[1])).T
-        	q -= max_mat
-
-
-
-        # normalize
-        return np.exp(q ) / (np.sum(np.exp(q)))
+    def stable_softmax(q):
+    	q -= np.max(q)
+        return np.exp(q)/np.sum(np.exp(q),axis =1, keepdims = True)
 	
-    def log_stable_softmax(q, stable):
-    	if stable:
-    		maxs = np.apply_along_axis( np.max, axis=1, arr=q ).T
-        	max_mat = np.vstack(tuple([maxs]*q.shape[1])).T
-        	q -= max_mat
-        	return maxs + np.log(np.exp(q - max_mat).sum(axis=1))
-    	return -np.log(np.exp(q).sum(axis=1))
+	# data loss
+    def data_loss(q, x, y):
+    	probs = stable_softmax(q)
+    	logprobs = -np.log(probs[range(x.shape[0]),y])
+    	return np.max(q) + logprobs.mean()
     
     # compute data loss
-    data_loss = log_stable_softmax(scores).mean()
+    data_loss = data_loss(scores, X, y)
     
     # compute regularization loss
     reg_loss = (0.5*reg) * ((W1**2).sum() + (W2**2).sum())
@@ -199,10 +168,7 @@ class TwoLayerMLP(object):
         dz1 = dhidden
         dz1[z1 <= 0] = 0
     elif self.activation is 'softplus':
-        # def sigmoid(q):
-        #     q -= np.max(q)
-        #     return np.exp(q) / (1 + np.exp(q))
-        dz1 = hidden*dhidden
+        dz1 = (1/(1+np.exp(-z1)))*dhidden
 
     elif self.activation is 'sigmoid': 
         dsig = hidden*(1 - hidden)
@@ -318,16 +284,9 @@ class TwoLayerMLP(object):
       to have class c, where 0 <= c < C.
     
     """
-
-    #hidden = sigmoid(np.dot(X, W1) + b1)
-    #print hidden.shape
-    #scores = np.dot(hidden, W2) + b2
-    #print scores.shape
-    def sigmoid(q):
-        return np.exp(q) / (1 + np.exp(q))
     W1, b1 = self.params['W1'], self.params['b1']
     W2, b2 = self.params['W2'], self.params['b2']
-    y_pred = np.argmax(np.dot(sigmoid(np.dot(X, W1) + b1), W2) + b2, axis=1)
+    y_pred = np.argmax(np.dot(np.dot(X, W1) + b1, W2) + b2, axis=1)
 
     ###########################################################################
     # TODO: Implement this function; it should be VERY simple!
